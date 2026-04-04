@@ -39,6 +39,7 @@ jobs:
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
         run: |
           mkdir -p ~/.config/gplaycli
+          cat > ~/.config/gplaycli/gplaycli.conf << EOF
           
           # Write config directly with expanded variables
           echo "[Credentials]" > ~/.config/gplaycli/gplaycli.conf
@@ -53,7 +54,7 @@ jobs:
           echo "locale = en_US" >> ~/.config/gplaycli/gplaycli.conf
           echo "timezone = UTC" >> ~/.config/gplaycli/gplaycli.conf
           
-           # Place in current directory (top priority)
+          # Place in current directory (top priority)
           cp gplaycli.conf ./gplaycli.conf
           
           # Place in ~/.config/gplaycli/
@@ -65,7 +66,8 @@ jobs:
           cp gplaycli.conf ~/.local/etc/gplaycli/gplaycli.conf
           
           echo "✅ Config files created in multiple locations"
-          cat ~/.config/gplaycli/gplaycli.conf
+          echo "File contents:"
+          cat ./gplaycli.conf
 
       - name: Download APK
         env:
