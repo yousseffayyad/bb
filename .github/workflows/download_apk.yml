@@ -42,7 +42,7 @@ jobs:
           du -h tools/raccoon-4.24.0.jar || true
           
           if [ ! -s tools/raccoon-4.24.0.jar ]; then
-            echo "⚠️ Raccoon JAR missing or empty — downloading via raw URL"
+            echo "⚠️ Raccoon JAR missing — downloading via raw URL"
             curl -L -o tools/raccoon-4.24.0.jar \
               https://raw.githubusercontent.com/yousseffayyad/bb/dev/tools/raccoon-4.24.0.jar
           fi
@@ -54,7 +54,7 @@ jobs:
           
           echo "✅ Raccoon JAR ready:"
           ls -lah tools/raccoon-4.24.0.jar
-    
+
       - name: Create output directory
         run: mkdir -p ./apk_output
 
@@ -63,6 +63,7 @@ jobs:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
           COUNTRY_CODE: ${{ github.event.inputs.country_code }}
+          PACKAGE_NAME: ${{ github.event.inputs.package_name }}
         run: |
           mkdir -p ~/.config/raccoon
           cat > ~/.config/raccoon/config.properties << EOF
@@ -74,38 +75,34 @@ jobs:
           device.language=en
           device.sdk=29
           device.name=Pixel_4
+          packages=${PACKAGE_NAME}
           EOF
           
           echo "✅ Raccoon configuration created"
           cat ~/.config/raccoon/config.properties
 
-      - name: Download APK with Raccoon (Headless)
+      - name: Download APK with Raccoon
         run: |
-          # Use the committed JAR path
           RACOON_JAR=tools/raccoon-4.24.0.jar
-      
+
           if [ ! -f "$RACOON_JAR" ]; then
-          echo "❌ Raccoon JAR not found at $RACOON_JAR"
-          exit 1
+            echo "❌ Raccoon JAR not found at $RACOON_JAR"
+            exit 1
           fi
-          
-          # Run Raccoon with Xvfb (virtual display)
-          xvfb-run -a java -jar "$RACOON_JAR" \
-            --download \
-            --package ${{ github.event.inputs.package_name }} \
-            --output ./apk_output/
-          
-          # Wait for download to complete
-          sleep 10
-          
+
+          echo "✅ Using Raccoon JAR at $RACOON_JAR"
+
+          # Run Raccoon (4.x reads config.properties automatically)
+          xvfb-run -a java -jar "$RACOON_JAR"
+
           echo "✅ Download attempt completed"
 
       - name: Verify download
         run: |
           echo "Searching for APK files..."
-          find ./apk_output -name "*.apk" -type f
-          
-          if [ -z "$(find ./apk_output -name '*.apk' -type f)" ]; then
+          apk_files=$(find ./apk_output -name "*.apk" -type f)
+
+          if [ -z "$apk_files" ]; then
             echo "⚠️ No APK files downloaded"
             echo "Directory contents:"
             ls -la ./apk_output/ || echo "Directory empty"
@@ -126,35 +123,31 @@ jobs:
           from pathlib import Path
           from supabase import create_client
 
-          # Initialize Supabase client
           supabase = create_client(
               os.environ["SUPABASE_URL"],
               os.environ["SUPABASE_SERVICE_KEY"]
           )
-          
-          # Find APK file (search recursively)
+
           apk_files = list(Path("./apk_output").rglob("*.apk"))
-          
+
           if not apk_files:
               print("❌ No APK files found")
               exit(1)
-          
+
           apk_path = apk_files[0]
           package_name = os.environ["PACKAGE_NAME"]
           storage_path = f"{package_name}/{apk_path.name}"
-          
-          # Ensure bucket exists
+
           bucket_name = "apk-files"
           try:
               supabase.storage.create_bucket(bucket_name, {"public": False})
               print(f"📦 Created bucket: {bucket_name}")
           except Exception as e:
               print(f"📦 Bucket likely exists: {e}")
-          
-          # Upload to Supabase Storage
+
           with open(apk_path, "rb") as f:
               file_data = f.read()
-          
+
           try:
               supabase.storage.from_(bucket_name).upload(
                   storage_path,
@@ -165,7 +158,6 @@ jobs:
               print(f"📊 File size: {len(file_data):,} bytes")
           except Exception as e:
               print(f"⚠️ Upload error: {e}")
-              # Try alternative upload method
               supabase.storage.from_(bucket_name).remove([storage_path])
               supabase.storage.from_(bucket_name).upload(storage_path, file_data)
               print(f"✅ Re-uploaded {apk_path.name}")
