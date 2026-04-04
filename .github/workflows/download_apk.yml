@@ -29,15 +29,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb wget
 
-      - name: Use committed Raccoon JAR
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Ensure Raccoon JAR exists
         run: |
-          RACOON_JAR=tools/raccoon-4.24.0.jar
-            if [ ! -f "$RACOON_JAR" ]; then
-              echo "❌ Raccoon JAR not found in $RACOON_JAR"
-              exit 1
-            fi
-            echo "✅ Using committed Raccoon JAR:"
-            ls -lah "$RACOON_JAR"
+          echo "📦 Checking tools folder"
+          ls -la tools/
+          du -h tools/raccoon-4.24.0.jar || true
+          
+          if [ ! -s tools/raccoon-4.24.0.jar ]; then
+            echo "⚠️ Raccoon JAR missing or empty — downloading via raw URL"
+            curl -L -o tools/raccoon-4.24.0.jar \
+              https://raw.githubusercontent.com/yousseffayyad/bb/dev/tools/raccoon-4.24.0.jar
+          fi
+          
+          if [ ! -s tools/raccoon-4.24.0.jar ]; then
+            echo "❌ Failed to get Raccoon JAR"
+            exit 1
+          fi
+          
+          echo "✅ Raccoon JAR ready:"
+          ls -lah tools/raccoon-4.24.0.jar
     
       - name: Create output directory
         run: mkdir -p ./apk_output
@@ -65,6 +81,14 @@ jobs:
 
       - name: Download APK with Raccoon (Headless)
         run: |
+          # Use the committed JAR path
+          RACOON_JAR=tools/raccoon-4.24.0.jar
+      
+          if [ ! -f "$RACOON_JAR" ]; then
+          echo "❌ Raccoon JAR not found at $RACOON_JAR"
+          exit 1
+          fi
+          
           # Run Raccoon with Xvfb (virtual display)
           xvfb-run -a java -jar raccoon.jar \
             --headless \
