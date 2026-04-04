@@ -7,6 +7,11 @@ on:
         description: 'Android package name'
         required: true
         type: string
+      country_code:
+        description: 'Country code (US, GB, JP, etc.)'
+        required: false
+        type: string
+        default: 'US'
 
 jobs:
   download:
@@ -20,18 +25,36 @@ jobs:
 
       - name: Install gplaycli and supabase
         run: |
-          pip install gplaycli supabase
+          pip install --upgrade pip
+          pip install "protobuf==3.20.3"
+          pip install gplaycli
+          pip install supabase
 
-      - name: Download APK with gplaycli
+      - name: Create output directory
+        run: mkdir -p ./apk_output
+
+      - name: Download APK
         env:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
         run: |
-          mkdir -p ./apk_output
           gplaycli -p ${{ github.event.inputs.package_name }} \
             -d ./apk_output/ \
             -e "$GOOGLE_EMAIL" \
-            -pss "$GOOGLE_PASSWORD"
+            -pss "$GOOGLE_PASSWORD" \
+            -c ${{ github.event.inputs.country_code }} \
+            -v
+
+      - name: Verify download
+        run: |
+          if [ -z "$(ls -A ./apk_output/)" ]; then
+            echo "⚠️ No APK files downloaded"
+            exit 1
+          else
+            echo "✅ Downloaded:"
+            ls -lah ./apk_output/
+          fi
 
       - name: Upload APK to Supabase
         env:
@@ -44,19 +67,44 @@ jobs:
           from pathlib import Path
           from supabase import create_client
 
-          client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+          # Initialize Supabase client
+          supabase = create_client(
+              os.environ["SUPABASE_URL"],
+              os.environ["SUPABASE_SERVICE_KEY"]
+          )
           
+          # Find APK file
           apk_files = list(Path("./apk_output").glob("*.apk"))
           if not apk_files:
               print("No APK files found")
-              exit(0)
+              exit(1)
           
-          for apk_path in apk_files:
-              with open(apk_path, "rb") as f:
-                  client.storage.from_("apk-files").upload(
-                      f"{os.environ['PACKAGE_NAME']}/{apk_path.name}",
-                      f.read(),
-                      {"upsert": True}
-                  )
-              print(f"✅ Uploaded {apk_path.name}")
+          apk_path = apk_files[0]
+          package_name = os.environ["PACKAGE_NAME"]
+          storage_path = f"{package_name}/{apk_path.name}"
+          
+          # Ensure bucket exists
+          bucket_name = "apk-files"
+          try:
+              supabase.storage.create_bucket(bucket_name, {"public": False})
+              print(f"📦 Created bucket: {bucket_name}")
+          except Exception as e:
+              print(f"📦 Bucket likely exists: {e}")
+          
+          # Upload to Supabase Storage
+          with open(apk_path, "rb") as f:
+              supabase.storage.from_(bucket_name).upload(
+                  storage_path,
+                  f.read(),
+                  {"upsert": True}
+              )
+          
+          print(f"✅ Uploaded {apk_path.name} to {storage_path}")
           EOF
+
+      - name: Upload artifact backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.package_name }}
+          path: ./apk_output/
+          if-no-files-found: error
