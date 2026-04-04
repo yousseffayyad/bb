@@ -1,81 +1,37 @@
-name: Download APK with Raccoon and Push to Supabase
+name: Download APK and Push to Supabase
 
 on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: 'Android package name (e.g., com.example.app)'
+        description: 'Android package name'
         required: true
         type: string
-      country_code:
-        description: 'Country code for region bypass (e.g., US, GB, JP)'
-        required: false
-        type: string
-        default: 'US'
 
 jobs:
   download:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Setup Java
-        uses: actions/setup-java@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          distribution: 'temurin'
-          java-version: '11'
+          python-version: '3.11'
 
-      - name: Download Raccoon JAR
+      - name: Install gplaycli and supabase
         run: |
-          wget https://github.com/onyxbits/Raccoon/releases/download/v4.12.0/Raccoon-v4.12.0.jar -O raccoon.jar
-          echo "✅ Raccoon downloaded"
+          pip install gplaycli supabase
 
-      - name: Create Raccoon config directory
-        run: |
-          mkdir -p ~/.raccoon
-          mkdir -p ./apk_output
-
-      - name: Configure Raccoon with credentials
+      - name: Download APK with gplaycli
         env:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
-          COUNTRY_CODE: ${{ github.event.inputs.country_code }}
         run: |
-          # Create Raccoon properties file
-          cat > ~/.raccoon/config.properties << EOF
-          google.account.email=${GOOGLE_EMAIL}
-          google.account.password=${GOOGLE_PASSWORD}
-          market.country=${COUNTRY_CODE}
-          download.folder=${PWD}/apk_output
-          EOF
-          
-          echo "✅ Raccoon configured"
-
-      - name: Download APK using Raccoon CLI
-        env:
-          PACKAGE_NAME: ${{ github.event.inputs.package_name }}
-        run: |
-          # Raccoon CLI command to download APK
-          java -jar raccoon.jar \
-            --headless \
-            --package "$PACKAGE_NAME" \
-            --output "./apk_output" \
-            --config ~/.raccoon/config.properties \
-            --download \
-            --paid-allow \
-            --region-bypass
-          
-          # Wait a moment for download to complete
-          sleep 5
-          
-          echo "✅ Download attempt completed"
-
-      - name: List output files
-        run: |
-          echo "=== APK Output Directory ==="
-          ls -lah ./apk_output || echo "No files found"
-          
-          # Also check for subdirectories (Raccoon sometimes creates them)
-          find ./apk_output -type f -name "*.apk" 2>/dev/null || echo "No APK files found in subdirectories"
+          mkdir -p ./apk_output
+          gplaycli -p ${{ github.event.inputs.package_name }} \
+            -d ./apk_output/ \
+            -e "$GOOGLE_EMAIL" \
+            -pss "$GOOGLE_PASSWORD"
 
       - name: Upload APK to Supabase
         env:
@@ -85,77 +41,22 @@ jobs:
         run: |
           python - <<EOF
           import os
-          import re
           from pathlib import Path
           from supabase import create_client
 
-          supabase_url = os.environ.get("SUPABASE_URL")
-          supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-          package_name = os.environ.get("PACKAGE_NAME")
-
-          if not supabase_url or not supabase_key:
-              print("❌ Supabase credentials missing")
-              exit(1)
-
-          client = create_client(supabase_url, supabase_key)
-
-          # Search for APK files (Raccoon saves as [package_name].apk or similar)
-          output_dir = Path("./apk_output")
-          apk_files = list(output_dir.rglob("*.apk"))  # Search recursively
+          client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
           
-          # Also check current directory
-          apk_files.extend(Path(".").glob("*.apk"))
-
+          apk_files = list(Path("./apk_output").glob("*.apk"))
           if not apk_files:
-              print("❌ No APK files found, skipping upload")
-              print("   Checked in:", output_dir.absolute(), "and current directory")
+              print("No APK files found")
               exit(0)
-
-          bucket_name = "apk-files"
           
-          # Try to create bucket if it doesn't exist
-          try:
-              client.storage.create_bucket(bucket_name, {"public": False})
-              print(f"📦 Created bucket: {bucket_name}")
-          except Exception as e:
-              print(f"📦 Bucket likely exists: {e}")
-
           for apk_path in apk_files:
-              filename = apk_path.name
-          
-              # Upload file
               with open(apk_path, "rb") as f:
-                  file_data = f.read()
-          
-              # Store with package name as folder
-              storage_path = f"{package_name}/{filename}"
-          
-              try:
-                  # Try to upload/update
-                  client.storage.from_(bucket_name).upload(
-                      storage_path,
-                      file_data,
+                  client.storage.from_("apk-files").upload(
+                      f"{os.environ['PACKAGE_NAME']}/{apk_path.name}",
+                      f.read(),
                       {"upsert": True}
                   )
-                  print(f"✅ Uploaded: {storage_path} ({len(file_data):,} bytes)")
-              except Exception as e:
-                  print(f"⚠️ Upload error: {e}")
-          
-                  # Try alternative: remove existing then upload
-                  try:
-                      client.storage.from_(bucket_name).remove([storage_path])
-                      client.storage.from_(bucket_name).upload(storage_path, file_data)
-                      print(f"✅ Re-uploaded: {storage_path}")
-                  except Exception as e2:
-                      print(f"❌ Failed to upload {storage_path}: {e2}")
+              print(f"✅ Uploaded {apk_path.name}")
           EOF
-
-      - name: Upload APK artifact to GitHub (optional)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.package_name }}-apk
-          path: |
-            ./apk_output/*.apk
-            *.apk
-          if-no-files-found: warn
-          retention-days: 3
