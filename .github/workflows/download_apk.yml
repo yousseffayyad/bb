@@ -40,13 +40,24 @@ jobs:
         run: |
             mkdir -p ~/.config/gplaycli
             cat > ~/.config/gplaycli/gplaycli.conf << EOF
-            [googleplay]
+          
+            [Credentials]
             token = False
             gmail_address = $GOOGLE_EMAIL
             gmail_password = $GOOGLE_PASSWORD
-            device_codename = walleye
-            country = ${{ github.event.inputs.country_code }}
+          
+            [Cache]          
+            token = ~/.cache/gplaycli/token
+          
+            [Locale]          
+            locale = en_US
+            timezone = UTC
+          
             EOF
+          
+            sed -i "s/\$GOOGLE_EMAIL/$GOOGLE_EMAIL/g" ~/.config/gplaycli/gplaycli.conf
+            sed -i "s/\$GOOGLE_PASSWORD/$GOOGLE_PASSWORD/g" ~/.config/gplaycli/gplaycli.conf
+          
             echo "✅ Config file created at ~/.config/gplaycli/gplaycli.conf"
 
       - name: Download APK
