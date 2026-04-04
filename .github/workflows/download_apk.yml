@@ -35,30 +35,37 @@ jobs:
 
       - name: Create gplaycli config file
         env:
-            GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
-            GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+          GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
+          GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
         run: |
-            mkdir -p ~/.config/gplaycli
-            cat > ~/.config/gplaycli/gplaycli.conf << EOF
+          mkdir -p ~/.config/gplaycli
           
-            [Credentials]
-            token = False
-            gmail_address = $GOOGLE_EMAIL
-            gmail_password = $GOOGLE_PASSWORD
+          # Write config directly with expanded variables
+          echo "[Credentials]" > ~/.config/gplaycli/gplaycli.conf
+          echo "token = False" >> ~/.config/gplaycli/gplaycli.conf
+          echo "gmail_address = ${GOOGLE_EMAIL}" >> ~/.config/gplaycli/gplaycli.conf
+          echo "gmail_password = ${GOOGLE_PASSWORD}" >> ~/.config/gplaycli/gplaycli.conf
+          echo "" >> ~/.config/gplaycli/gplaycli.conf
+          echo "[Cache]" >> ~/.config/gplaycli/gplaycli.conf
+          echo "token = ~/.cache/gplaycli/token" >> ~/.config/gplaycli/gplaycli.conf
+          echo "" >> ~/.config/gplaycli/gplaycli.conf
+          echo "[Locale]" >> ~/.config/gplaycli/gplaycli.conf
+          echo "locale = en_US" >> ~/.config/gplaycli/gplaycli.conf
+          echo "timezone = UTC" >> ~/.config/gplaycli/gplaycli.conf
           
-            [Cache]          
-            token = ~/.cache/gplaycli/token
+           # Place in current directory (top priority)
+          cp gplaycli.conf ./gplaycli.conf
           
-            [Locale]          
-            locale = en_US
-            timezone = UTC
+          # Place in ~/.config/gplaycli/
+          mkdir -p ~/.config/gplaycli
+          cp gplaycli.conf ~/.config/gplaycli/gplaycli.conf
           
-            EOF
+          # Place in ~/.local/etc/gplaycli/ (where error shows it's looking)
+          mkdir -p ~/.local/etc/gplaycli
+          cp gplaycli.conf ~/.local/etc/gplaycli/gplaycli.conf
           
-            sed -i "s/\$GOOGLE_EMAIL/$GOOGLE_EMAIL/g" ~/.config/gplaycli/gplaycli.conf
-            sed -i "s/\$GOOGLE_PASSWORD/$GOOGLE_PASSWORD/g" ~/.config/gplaycli/gplaycli.conf
-          
-            echo "✅ Config file created at ~/.config/gplaycli/gplaycli.conf"
+          echo "✅ Config files created in multiple locations"
+          cat ~/.config/gplaycli/gplaycli.conf
 
       - name: Download APK
         env:
@@ -67,6 +74,7 @@ jobs:
           gplaycli \
           -d ${{ github.event.inputs.package_name }} \
           -f ./apk_output/ \
+          -c ./gplaycli.conf \
           -p \
           -v
 
