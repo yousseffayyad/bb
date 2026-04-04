@@ -33,18 +33,31 @@ jobs:
       - name: Create output directory
         run: mkdir -p ./apk_output
 
+      - name: Create gplaycli config file
+        env:
+            GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
+            GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+        run: |
+            mkdir -p ~/.config/gplaycli
+            cat > ~/.config/gplaycli/gplaycli.conf << EOF
+            [googleplay]
+            token = False
+            gmail_address = $GOOGLE_EMAIL
+            gmail_password = $GOOGLE_PASSWORD
+            device_codename = walleye
+            country = ${{ github.event.inputs.country_code }}
+            EOF
+            echo "✅ Config file created at ~/.config/gplaycli/gplaycli.conf"
+
       - name: Download APK
         env:
-          GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
-          GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
           PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
         run: |
-          gplaycli -p ${{ github.event.inputs.package_name }} \
-            -d ./apk_output/ \
-            -e "$GOOGLE_EMAIL" \
-            -pss "$GOOGLE_PASSWORD" \
-            -c ${{ github.event.inputs.country_code }} \
-            -v
+          gplaycli \
+          -d ${{ github.event.inputs.package_name }} \
+          -f ./apk_output/ \
+          -p \
+          -v
 
       - name: Verify download
         run: |
