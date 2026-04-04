@@ -91,7 +91,6 @@ jobs:
           
           # Run Raccoon with Xvfb (virtual display)
           xvfb-run -a java -jar "$RACOON_JAR" \
-            --headless \
             --download \
             --package ${{ github.event.inputs.package_name }} \
             --output ./apk_output/
