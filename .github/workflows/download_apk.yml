@@ -31,7 +31,7 @@ jobs:
 
       - name: Use committed Raccoon JAR
         run: |
-            RACOON_JAR=tools/raccoon.jar
+          RACOON_JAR=tools/raccoon-4.24.0.jar
             if [ ! -f "$RACOON_JAR" ]; then
               echo "❌ Raccoon JAR not found in $RACOON_JAR"
               exit 1
