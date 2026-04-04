@@ -42,9 +42,6 @@ jobs:
       - name: Create output directory
         run: mkdir -p ./apk_output
 
-      - name: Create output directory
-        run: mkdir -p ./apk_output
-
       - name: Create Raccoon configuration
         env:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
