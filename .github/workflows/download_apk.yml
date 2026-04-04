@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: 'Android package name (e.g., com.valmo.valmo)'
+        description: 'Android package name (e.g., com.facebook.katana)'
         required: true
         type: string
       country_code:
@@ -31,9 +31,36 @@ jobs:
 
       - name: Download Raccoon
         run: |
-          # Download latest Raccoon version
-          wget https://github.com/onyxbits/raccoon4/releases/download/v4.24.0/Raccoon-desktop-4.24.0.jar -O raccoon.jar
-          echo "✅ Raccoon downloaded"
+          set -e
+          
+          echo "🔍 Fetching latest Raccoon download URL..."
+          
+          URL=$(curl -fsSL https://raccoon.onyxbits.de/downloads/ \
+            | grep -oE 'https://raccoon\.onyxbits\.de/files/[a-zA-Z0-9._-]+\.jar' \
+            | head -n 1)
+          
+          if [ -z "$URL" ]; then
+            echo "❌ Failed to extract download URL"
+            exit 1
+          fi
+          
+          echo "⬇️ Downloading: $URL"
+          
+          wget -q --show-progress --tries=3 -O raccoon.jar "$URL"
+          
+          # Validate file (important!)
+          if [ ! -s raccoon.jar ]; then
+            echo "❌ Downloaded file is empty"
+            exit 1
+          fi
+          
+          # Check it's actually a JAR (not HTML)
+          file raccoon.jar | grep -q "Zip archive" || {
+            echo "❌ Downloaded file is not a valid JAR"
+            exit 1
+          }
+      
+          echo "✅ Raccoon downloaded successfully"
           ls -lah raccoon.jar
 
       - name: Create output directory
