@@ -1,10 +1,10 @@
-name: Download APK and Push to Supabase
+name: Download APK with Raccoon and Push to Supabase
 
 on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: 'Android package name'
+        description: 'Android package name (e.g., com.valmo.valmo)'
         required: true
         type: string
       country_code:
@@ -18,76 +18,75 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Java
+        uses: actions/setup-java@v3
         with:
-          python-version: '3.11'
+          distribution: 'temurin'
+          java-version: '11'
 
-      - name: Install gplaycli and supabase
+      - name: Install Xvfb (Virtual Display) and dependencies
         run: |
-          pip install --upgrade pip
-          pip install "protobuf==3.20.3"
-          pip install gplaycli
-          pip install supabase
+          sudo apt-get update
+          sudo apt-get install -y xvfb wget
+
+      - name: Download Raccoon
+        run: |
+          # Download latest Raccoon version
+          wget https://github.com/onyxbits/raccoon4/releases/download/v4.24.0/Raccoon-desktop-4.24.0.jar -O raccoon.jar
+          echo "✅ Raccoon downloaded"
+          ls -lah raccoon.jar
 
       - name: Create output directory
         run: mkdir -p ./apk_output
 
-      - name: Create gplaycli config file
+      - name: Create Raccoon configuration
         env:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+          COUNTRY_CODE: ${{ github.event.inputs.country_code }}
         run: |
-          mkdir -p ~/.config/gplaycli
-          cat > ~/.config/gplaycli/gplaycli.conf << EOF
+          mkdir -p ~/.config/raccoon
+          cat > ~/.config/raccoon/config.properties << EOF
+          # Raccoon Configuration
+          account.email=${GOOGLE_EMAIL}
+          account.password=${GOOGLE_PASSWORD}
+          download.dir=${PWD}/apk_output
+          device.country=${COUNTRY_CODE}
+          device.language=en
+          device.sdk=29
+          device.name=Pixel_4
+          EOF
           
-          # Write config directly with expanded variables
-          echo "[Credentials]" > ~/.config/gplaycli/gplaycli.conf
-          echo "token = False" >> ~/.config/gplaycli/gplaycli.conf
-          echo "gmail_address = ${GOOGLE_EMAIL}" >> ~/.config/gplaycli/gplaycli.conf
-          echo "gmail_password = ${GOOGLE_PASSWORD}" >> ~/.config/gplaycli/gplaycli.conf
-          echo "" >> ~/.config/gplaycli/gplaycli.conf
-          echo "[Cache]" >> ~/.config/gplaycli/gplaycli.conf
-          echo "token = ~/.cache/gplaycli/token" >> ~/.config/gplaycli/gplaycli.conf
-          echo "" >> ~/.config/gplaycli/gplaycli.conf
-          echo "[Locale]" >> ~/.config/gplaycli/gplaycli.conf
-          echo "locale = en_US" >> ~/.config/gplaycli/gplaycli.conf
-          echo "timezone = UTC" >> ~/.config/gplaycli/gplaycli.conf
-          
-          # Place in current directory (top priority)
-          cp gplaycli.conf ./gplaycli.conf
-          
-          # Place in ~/.config/gplaycli/
-          mkdir -p ~/.config/gplaycli
-          cp gplaycli.conf ~/.config/gplaycli/gplaycli.conf
-          
-          # Place in ~/.local/etc/gplaycli/ (where error shows it's looking)
-          mkdir -p ~/.local/etc/gplaycli
-          cp gplaycli.conf ~/.local/etc/gplaycli/gplaycli.conf
-          
-          echo "✅ Config files created in multiple locations"
-          echo "File contents:"
-          cat ./gplaycli.conf
+          echo "✅ Raccoon configuration created"
+          cat ~/.config/raccoon/config.properties
 
-      - name: Download APK
-        env:
-          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      - name: Download APK with Raccoon (Headless)
         run: |
-          gplaycli \
-          -d ${{ github.event.inputs.package_name }} \
-          -f ./apk_output/ \
-          -c ./gplaycli.conf \
-          -p \
-          -v
+          # Run Raccoon with Xvfb (virtual display)
+          xvfb-run -a java -jar raccoon.jar \
+            --headless \
+            --download \
+            --package ${{ github.event.inputs.package_name }} \
+            --output ./apk_output/
+          
+          # Wait for download to complete
+          sleep 5
+          
+          echo "✅ Download attempt completed"
 
       - name: Verify download
         run: |
-          if [ -z "$(ls -A ./apk_output/)" ]; then
+          echo "Searching for APK files..."
+          find ./apk_output -name "*.apk" -type f
+          
+          if [ -z "$(find ./apk_output -name '*.apk' -type f)" ]; then
             echo "⚠️ No APK files downloaded"
+            echo "Directory contents:"
+            ls -la ./apk_output/ || echo "Directory empty"
             exit 1
           else
-            echo "✅ Downloaded:"
-            ls -lah ./apk_output/
+            echo "✅ Downloaded APK(s):"
+            ls -lah ./apk_output/*.apk 2>/dev/null || ls -lah ./apk_output/**/*.apk 2>/dev/null
           fi
 
       - name: Upload APK to Supabase
@@ -107,10 +106,11 @@ jobs:
               os.environ["SUPABASE_SERVICE_KEY"]
           )
           
-          # Find APK file
-          apk_files = list(Path("./apk_output").glob("*.apk"))
+          # Find APK file (search recursively)
+          apk_files = list(Path("./apk_output").rglob("*.apk"))
+          
           if not apk_files:
-              print("No APK files found")
+              print("❌ No APK files found")
               exit(1)
           
           apk_path = apk_files[0]
@@ -127,18 +127,36 @@ jobs:
           
           # Upload to Supabase Storage
           with open(apk_path, "rb") as f:
+              file_data = f.read()
+          
+          try:
               supabase.storage.from_(bucket_name).upload(
                   storage_path,
-                  f.read(),
+                  file_data,
                   {"upsert": True}
               )
-          
-          print(f"✅ Uploaded {apk_path.name} to {storage_path}")
+              print(f"✅ Uploaded {apk_path.name} to {storage_path}")
+              print(f"📊 File size: {len(file_data):,} bytes")
+          except Exception as e:
+              print(f"⚠️ Upload error: {e}")
+              # Try alternative upload method
+              supabase.storage.from_(bucket_name).remove([storage_path])
+              supabase.storage.from_(bucket_name).upload(storage_path, file_data)
+              print(f"✅ Re-uploaded {apk_path.name}")
           EOF
 
       - name: Upload artifact backup
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.package_name }}
-          path: ./apk_output/
-          if-no-files-found: error
+          path: |
+            ./apk_output/*.apk
+            ./apk_output/**/*.apk
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "📊 Download directory contents:"
+          tree ./apk_output/ || ls -laR ./apk_output/
